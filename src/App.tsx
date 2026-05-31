@@ -199,10 +199,13 @@ function ChatModule() {
     try {
       const reply = hasGeminiKey()
         ? await chatWithGemini(
-            nextMessages,
-            `You are SmartSpace, an Indian real estate advisor. The user selected this property first: ${JSON.stringify(selected)}. Compare only if useful using these options: ${JSON.stringify(picks)}. Be concise and practical.`,
-          )
-        : fallback;
+          nextMessages,
+          `You are SmartSpace, an Indian real estate advisor. The user selected this property first: ${JSON.stringify(selected)}. Compare only if useful using these options: ${JSON.stringify(picks)}. Be concise and practical.`,
+        )
+        : await chatWithGemini(
+          nextMessages,
+          `You are SmartSpace, an Indian real estate advisor. The user selected this property first: ${JSON.stringify(selected)}. Compare only if useful using these options: ${JSON.stringify(picks)}. Be concise and practical.`,
+        );
       setMessages((m) => [...m, { role: 'ai', text: reply }]);
     } catch {
       setMessages((m) => [...m, { role: 'ai', text: fallback }]);
@@ -217,7 +220,7 @@ function ChatModule() {
         <div className="glass-card flex min-h-[590px] flex-col rounded-lg">
           <div className="border-b border-white/[0.08] p-4">
             <div className="flex items-center gap-2 text-sm text-text-secondary">
-              <Sparkles size={16} className="text-accent-green" /> {hasGeminiKey() ? 'Gemini is connected from environment variables.' : 'Instant AI demo mode is active.'}
+              <Sparkles size={16} className="text-accent-green" /> Gemini uses the secure API route when deployed, with fallback if unavailable.
             </div>
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto p-4">

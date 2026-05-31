@@ -1,7 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 let genAI: GoogleGenerativeAI | null = null;
-declare const __GEMINI_API_KEY__: string;
 
 export function initGemini(apiKey: string) {
   genAI = new GoogleGenerativeAI(apiKey);
@@ -9,7 +8,7 @@ export function initGemini(apiKey: string) {
 
 export function getGeminiApiKey() {
   const env = import.meta.env as Record<string, string | undefined>;
-  return env.VITE_GEMINI_API_KEY || env.VITE_GOOGLE_API_KEY || __GEMINI_API_KEY__ || '';
+  return env.VITE_GEMINI_API_KEY || env.VITE_GOOGLE_API_KEY || '';
 }
 
 export function hasGeminiKey() {
@@ -27,6 +26,17 @@ export async function chatWithGemini(
   messages: { role: string; text: string }[],
   systemPrompt: string
 ): Promise<string> {
+  const apiResponse = await fetch('/api/gemini-chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, systemPrompt }),
+  }).catch(() => null);
+
+  if (apiResponse?.ok) {
+    const data = await apiResponse.json();
+    if (data.text) return data.text;
+  }
+
   ensureGemini();
   if (!genAI) throw new Error('Gemini not initialized');
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
