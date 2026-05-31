@@ -4,8 +4,8 @@ import {
 } from 'recharts';
 import {
   ArrowRight, BadgeIndianRupee, Building2, CalendarDays, Check, Clock3,
-  Filter, Heart, Home, IndianRupee, MapPin, Mic, Route, ScanLine,
-  Search, Send, ShieldCheck, SlidersHorizontal, Sparkles, Star, TrendingUp, Users, Zap,
+  Heart, Home, IndianRupee, MapPin, Mic, Route, ScanLine,
+  Search, Send, ShieldCheck, Sparkles, Star, TrendingUp, Users, Zap,
 } from 'lucide-react';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
@@ -16,6 +16,8 @@ import { useAppStore } from './store/useAppStore';
 import { analyzeImagesWithGemini, chatWithGemini, hasGeminiKey } from './utils/gemini';
 
 const cityOptions = ['All cities', ...Array.from(new Set(properties.map((p) => p.city)))];
+const typeOptions = ['All types', ...Array.from(new Set(properties.map((p) => p.type)))];
+const bedroomOptions = ['Any BHK', '1 BHK', '2 BHK', '3 BHK', '4 BHK', '5 BHK'];
 const budgetOptions = [
   { label: 'Any budget', min: 0, max: Infinity },
   { label: 'Under 1 Cr', min: 0, max: 10000000 },
@@ -46,6 +48,44 @@ function getBestProperties(limit = 6) {
     .map((property) => ({ property, score: scoreProperty(property) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+}
+
+function getSelectedProperty(selectedId: number | null) {
+  return properties.find((property) => property.id === selectedId) ?? getBestProperties(1)[0].property;
+}
+
+function getLocalityForProperty(property: Property) {
+  return localities.find((locality) => locality.name === property.locality && locality.city === property.city)
+    ?? localities.find((locality) => locality.name === property.locality)
+    ?? localities[0];
+}
+
+function PropertySelector({ label = 'Selected property' }: { label?: string }) {
+  const { selectedPropertyId, setSelectedPropertyId } = useAppStore();
+  const selected = getSelectedProperty(selectedPropertyId);
+
+  return (
+    <div className="glass-card rounded-lg p-4">
+      <label className="mb-2 block text-xs font-medium uppercase tracking-[0.12em] text-text-secondary">{label}</label>
+      <select
+        value={selected.id}
+        onChange={(e: any) => setSelectedPropertyId(Number(e.target.value))}
+        className="h-11 w-full rounded-lg border border-white/[0.08] bg-bg-secondary px-3 text-sm text-text-primary outline-none focus:border-accent-blue/50"
+      >
+        {properties.map((property) => (
+          <option key={property.id} value={property.id}>
+            {property.title} - {property.locality}, {property.city}
+          </option>
+        ))}
+      </select>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-text-secondary">
+        <span>{formatPrice(selected.price)}</span>
+        <span>{selected.bedrooms} BHK</span>
+        <span>{selected.area} sqft</span>
+        <span>{selected.rentalYield}% yield</span>
+      </div>
+    </div>
+  );
 }
 
 function fileToBase64(file: File) {
@@ -125,12 +165,22 @@ function PropertyCard({ item, compact = false }: { item: { property: Property; s
             Analyze <ArrowRight size={14} />
           </button>
         </div>
+        {!compact && (
+          <button
+            onClick={() => setSelectedPropertyId(p.id)}
+            className="mt-3 w-full rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-text-secondary transition hover:border-accent-blue/40 hover:text-text-primary"
+          >
+            Select for all modules
+          </button>
+        )}
       </div>
     </article>
   );
 }
 
 function ChatModule() {
+  const selectedId = useAppStore((s) => s.selectedPropertyId);
+  const selected = getSelectedProperty(selectedId);
   const [messages, setMessages] = useState([
     { role: 'ai', text: 'Tell me your budget, preferred city, commute, and family needs. I will shortlist properties with a clear reason.' },
   ]);
@@ -144,13 +194,13 @@ function ChatModule() {
     setMessages(nextMessages);
     setDraft('');
     setLoading(true);
-    const picks = getBestProperties(3).map((p) => p.property);
-    const fallback = `I found ${picks.length} strong fits. ${picks[0].title} leads because it balances metro access, schools, and ${picks[0].rentalYield}% rental yield. I would compare it with ${picks[1].title} if you want a quieter micro-market.`;
+    const picks = [selected, ...getBestProperties(4).map((p) => p.property).filter((p) => p.id !== selected.id)].slice(0, 4);
+    const fallback = `${selected.title} is selected. It is a ${selected.bedrooms} BHK in ${selected.locality}, ${selected.city} at ${formatPrice(selected.price)}. Key positives: ${selected.nearbyMetro}, ${selected.nearbySchools[0]}, ${selected.rentalYield}% rental yield, and ${selected.appreciationRate}% appreciation. Main check: noise level is ${selected.noiseLevel} dB and builder rating is ${selected.builderRating}/5.`;
     try {
       const reply = hasGeminiKey()
         ? await chatWithGemini(
             nextMessages,
-            `You are SmartSpace, an Indian real estate advisor. Recommend from this property data: ${JSON.stringify(picks)}. Be concise and practical.`,
+            `You are SmartSpace, an Indian real estate advisor. The user selected this property first: ${JSON.stringify(selected)}. Compare only if useful using these options: ${JSON.stringify(picks)}. Be concise and practical.`,
           )
         : fallback;
       setMessages((m) => [...m, { role: 'ai', text: reply }]);
@@ -195,6 +245,7 @@ function ChatModule() {
           </div>
         </div>
         <div className="space-y-4">
+          <PropertySelector label="Ask about property" />
           {getBestProperties(3).map((item) => <PropertyCard key={item.property.id} item={item} compact />)}
         </div>
       </div>
@@ -210,9 +261,10 @@ function LifestyleModule() {
     [weights],
   );
   const selected = ranked.find((x) => x.property.id === selectedId) ?? ranked[0];
+  const selectedLocality = getLocalityForProperty(selected.property);
 
   return (
-    <ModuleShell title="Lifestyle Match" eyebrow="Personalized scoring" action={<button className="inline-flex items-center gap-2 rounded-lg bg-white/[0.06] px-4 py-2 text-sm text-text-primary"><Filter size={16} /> Saved profile</button>}>
+    <ModuleShell title="Lifestyle Match" eyebrow="Personalized scoring" action={<div className="min-w-[320px]"><PropertySelector /></div>}>
       <div className="grid gap-5 xl:grid-cols-[300px_1fr_340px]">
         <div className="glass-card rounded-lg p-4">
           <h2 className="mb-4 text-sm font-semibold text-text-primary">Priorities</h2>
@@ -235,8 +287,19 @@ function LifestyleModule() {
           <h2 className="text-sm font-semibold text-text-primary">Best current fit</h2>
           <p className="mt-2 text-xl font-semibold text-accent-green">{selected.score}/100</p>
           <p className="mt-2 text-sm text-text-primary">{selected.property.title}</p>
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-text-secondary">
+            <span>Walk {selectedLocality.walkScore}</span>
+            <span>Transit {selectedLocality.transitScore}</span>
+            <span>Safety {selectedLocality.safetyScore}</span>
+            <span>Greenery {selectedLocality.greeneryScore}</span>
+          </div>
           <div className="mt-5 space-y-3 text-sm text-text-secondary">
-            {['Strong metro coverage', 'School and hospital access', 'Healthy rental demand', 'Noise risk reviewed'].map((x) => (
+            {[
+              selected.property.nearbyMetro,
+              selected.property.nearbySchools[0],
+              `${selected.property.rentalYield}% rental yield and ${selected.property.appreciationRate}% growth`,
+              `${selected.property.noiseLevel} dB noise level reviewed`,
+            ].map((x) => (
               <p key={x} className="flex items-center gap-2"><Check size={15} className="text-accent-green" /> {x}</p>
             ))}
           </div>
@@ -247,9 +310,11 @@ function LifestyleModule() {
 }
 
 function SmartMapModule() {
+  const selected = getSelectedProperty(useAppStore((s) => s.selectedPropertyId));
+  const selectedLocality = getLocalityForProperty(selected);
   const topLocalities = [...localities].sort((a, b) => b.amenityDensity + b.transitScore - (a.amenityDensity + a.transitScore)).slice(0, 8);
   return (
-    <ModuleShell title="Smart Map" eyebrow="Location intelligence">
+    <ModuleShell title="Smart Map" eyebrow="Location intelligence" action={<div className="min-w-[320px]"><PropertySelector /></div>}>
       <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
         <div className="glass-card relative min-h-[600px] overflow-hidden rounded-lg p-5">
           <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
@@ -259,13 +324,26 @@ function SmartMapModule() {
             </div>
           ))}
           <div className="relative z-10 max-w-sm rounded-lg border border-white/[0.08] bg-bg-secondary/90 p-4">
-            <p className="text-sm font-semibold text-text-primary">Heatmap layers</p>
+            <p className="text-sm font-semibold text-text-primary">{selected.title}</p>
+            <p className="mt-1 text-xs text-text-secondary">{selected.locality}, {selected.city}</p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs text-text-secondary">
-              {['Transit', 'Price', 'Safety', 'Greenery', 'Rental demand'].map((x) => <span key={x} className="rounded-full bg-white/[0.06] px-3 py-1">{x}</span>)}
+              {[
+                `Transit ${selectedLocality.transitScore}`,
+                `Price ${formatPrice(selected.price)}`,
+                `Safety ${selectedLocality.safetyScore}`,
+                `Greenery ${selectedLocality.greeneryScore}`,
+                `Demand ${selectedLocality.rentalDemand}`,
+              ].map((x) => <span key={x} className="rounded-full bg-white/[0.06] px-3 py-1">{x}</span>)}
             </div>
           </div>
         </div>
         <div className="space-y-3">
+          <div className="glass-card rounded-lg p-4">
+            <p className="text-sm font-semibold text-text-primary">Selected apartment location</p>
+            <p className="mt-2 text-sm text-text-secondary">{selected.nearbyMetro}</p>
+            <p className="mt-1 text-sm text-text-secondary">{selected.nearbyHospitals[0]}</p>
+            <p className="mt-1 text-sm text-text-secondary">{selected.nearbyOffices[0]}</p>
+          </div>
           {topLocalities.map((l) => (
             <div key={l.name} className="glass-card rounded-lg p-4">
               <div className="flex items-center justify-between">
@@ -284,7 +362,10 @@ function SmartMapModule() {
 }
 
 function SimulatorModule() {
-  const property = getBestProperties(1)[0].property;
+  const property = getSelectedProperty(useAppStore((s) => s.selectedPropertyId));
+  const commuteMinutes = Math.max(24, Math.round(70 - property.builderRating * 6 + property.noiseLevel / 3));
+  const errandMinutes = Math.max(12, Math.round(50 - property.amenities.length * 3));
+  const savedHours = Math.max(1.2, (8 - commuteMinutes / 12)).toFixed(1);
   const timeline = [
     ['08:10', 'Leave home', `${property.nearbyMetro} connection`],
     ['09:05', 'Office arrival', property.nearbyOffices[0]],
@@ -292,16 +373,16 @@ function SimulatorModule() {
     ['20:15', 'Family time', `${property.noiseLevel} dB estimated evening noise`],
   ];
   return (
-    <ModuleShell title="Life Simulator" eyebrow="Day-in-the-life planning">
+    <ModuleShell title="Life Simulator" eyebrow="Day-in-the-life planning" action={<div className="min-w-[320px]"><PropertySelector /></div>}>
       <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
         <div className="glass-card rounded-lg p-5">
           <p className="text-sm text-text-secondary">Selected property</p>
           <h2 className="mt-2 text-xl font-semibold text-text-primary">{property.title}</h2>
           <div className="mt-5 grid grid-cols-2 gap-3">
-            <MetricCard icon={Route} label="Commute" value="52 min" />
-            <MetricCard icon={Clock3} label="Errand time" value="34 min" tone="green" />
+            <MetricCard icon={Route} label="Commute" value={`${commuteMinutes} min`} />
+            <MetricCard icon={Clock3} label="Errand time" value={`${errandMinutes} min`} tone="green" />
             <MetricCard icon={ShieldCheck} label="Calm score" value={`${100 - property.noiseLevel}/100`} tone="purple" />
-            <MetricCard icon={CalendarDays} label="Weekly saved" value="4.2 hrs" tone="amber" />
+            <MetricCard icon={CalendarDays} label="Weekly saved" value={`${savedHours} hrs`} tone="amber" />
           </div>
         </div>
         <div className="glass-card rounded-lg p-5">
@@ -323,6 +404,7 @@ function SimulatorModule() {
 }
 
 function XrayModule() {
+  const property = getSelectedProperty(useAppStore((s) => s.selectedPropertyId));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [report, setReport] = useState('');
@@ -333,10 +415,10 @@ function XrayModule() {
     setFiles(selectedFiles);
     setLoading(true);
     const fallback = [
-      'Inspection summary: Photos received and checklist generated.',
+      `Inspection summary for ${property.title}.`,
       'Verdict: Consider after verification.',
-      'Priority checks: seepage, balcony waterproofing, electrical panel age, parking allotment, and society maintenance ledger.',
-      'Negotiation angle: keep 3-5% buffer until documents and snag list are cleared.',
+      `Priority checks: ${property.constructionYear} construction age, ${property.floor}/${property.totalFloors} floor services, ${property.furnishing} condition, seepage, electrical panel age, parking allotment, and society ledger.`,
+      `Negotiation angle: keep ${property.builderRating < 4 ? '6-8%' : '3-5%'} buffer until documents and snag list are cleared.`,
     ].join('\n');
     try {
       if (hasGeminiKey() && selectedFiles.length) {
@@ -348,7 +430,7 @@ function XrayModule() {
         );
         const aiReport = await analyzeImagesWithGemini(
           images,
-          'Inspect these property photos for visible real-estate risks. Return concise bullets with red flags, green flags, maintenance questions, and a buy/consider/avoid verdict.',
+          `Inspect these photos for ${property.title}. Property data: ${JSON.stringify(property)}. Return concise bullets with red flags, green flags, maintenance questions, and a buy/consider/avoid verdict.`,
         );
         setReport(aiReport);
       } else {
@@ -362,11 +444,11 @@ function XrayModule() {
   }
 
   return (
-    <ModuleShell title="Property X-Ray" eyebrow="Inspection assistant">
+    <ModuleShell title="Property X-Ray" eyebrow="Inspection assistant" action={<div className="min-w-[320px]"><PropertySelector /></div>}>
       <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
         <div className="glass-card flex min-h-[430px] flex-col items-center justify-center rounded-lg border-dashed p-8 text-center">
           <ScanLine size={42} className="text-accent-blue" />
-          <h2 className="mt-4 text-lg font-semibold text-text-primary">Upload photos for AI inspection</h2>
+          <h2 className="mt-4 text-lg font-semibold text-text-primary">Inspect {property.title}</h2>
           <p className="mt-2 max-w-md text-sm text-text-secondary">{hasGeminiKey() ? 'Gemini image analysis is connected from environment variables.' : 'Upload works now and returns a complete demo inspection report.'}</p>
           <input
             ref={fileInputRef}
@@ -386,7 +468,7 @@ function XrayModule() {
             <pre className="mt-4 whitespace-pre-wrap rounded-lg bg-bg-primary/70 p-4 text-sm leading-relaxed text-text-primary">{report}</pre>
           )}
           <div className="mt-5 space-y-3">
-            {flags.map((flag, i) => (
+            {[...flags, `Verify ${property.nearbyMetro}`, `Check ${property.furnishing} inventory`].map((flag, i) => (
               <div key={flag} className="flex items-start gap-3 rounded-lg bg-white/[0.04] p-3">
                 <span className={`mt-0.5 rounded px-2 py-1 text-xs ${i < 2 ? 'bg-accent-amber/15 text-accent-amber' : 'bg-accent-green/15 text-accent-green'}`}>{i < 2 ? 'Review' : 'Verify'}</span>
                 <p className="text-sm text-text-secondary">{flag}</p>
@@ -400,20 +482,27 @@ function XrayModule() {
 }
 
 function NegotiationModule() {
-  const property = properties[14];
+  const property = getSelectedProperty(useAppStore((s) => s.selectedPropertyId));
+  const marketGap = Math.max(4, Math.round((property.builderRating < 4 ? 12 : 8) + property.noiseLevel / 12));
   const rows = [
-    ['Aggressive', '15%', 'Point to area oversupply and ask for faster possession clause', 'High'],
-    ['Balanced', '9%', 'Use comparable transactions and bank-ready closing', 'Medium'],
-    ['Relationship-first', '5%', 'Ask for extras: parking, club fee waiver, modular kitchen', 'Low'],
+    ['Aggressive', `${marketGap + 5}%`, `Use ${property.noiseLevel} dB noise, ${property.constructionYear} age, and competing ${property.locality} listings`, 'High'],
+    ['Balanced', `${marketGap}%`, `Offer bank-ready closing and cite ${formatPrice(property.pricePerSqft)} per sqft benchmark`, 'Medium'],
+    ['Relationship-first', `${Math.max(3, marketGap - 4)}%`, `Ask for extras: parking, club fee waiver, repairs, or ${property.furnishing} inventory`, 'Low'],
   ];
   return (
-    <ModuleShell title="Negotiation" eyebrow="Offer strategy">
+    <ModuleShell title="Negotiation" eyebrow="Offer strategy" action={<div className="min-w-[320px]"><PropertySelector label="Negotiate for" /></div>}>
       <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
         <div className="glass-card rounded-lg p-5">
           <p className="text-sm text-text-secondary">Target property</p>
           <h2 className="mt-2 text-lg font-semibold text-text-primary">{property.title}</h2>
           <p className="mt-4 text-3xl font-semibold text-text-primary">{formatPrice(property.price)}</p>
-          <p className="mt-1 text-sm text-text-secondary">Suggested opening: {formatPrice(property.price * 0.91)}</p>
+          <p className="mt-1 text-sm text-text-secondary">Suggested opening: {formatPrice(property.price * (1 - marketGap / 100))}</p>
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-text-secondary">
+            <span>{property.area} sqft</span>
+            <span>{formatPrice(property.pricePerSqft)}/sqft</span>
+            <span>{property.possession}</span>
+            <span>{property.builderRating}/5 builder</span>
+          </div>
         </div>
         <div className="glass-card overflow-hidden rounded-lg">
           {rows.map(([name, discount, argument, risk]) => (
@@ -431,22 +520,29 @@ function NegotiationModule() {
 }
 
 function FamilyModule() {
+  const property = getSelectedProperty(useAppStore((s) => s.selectedPropertyId));
+  const locality = getLocalityForProperty(property);
   const personas = [
-    ['Parents', 'Hospital proximity and low-noise evenings', 86],
-    ['Children', 'Schools, play areas, safer crossings', 82],
-    ['Commuter', 'Metro access and office corridor', 91],
-    ['Investor', 'Yield, liquidity, appreciation', 88],
+    ['Parents', `${property.nearbyHospitals[0]} and ${100 - property.noiseLevel}/100 calm score`, Math.min(96, locality.safetyScore + (100 - property.noiseLevel) / 6)],
+    ['Children', `${property.nearbySchools[0]} plus ${property.amenities.includes("Children's Play Area") ? 'play area' : 'nearby school access'}`, Math.min(95, locality.safetyScore + property.bedrooms * 4)],
+    ['Commuter', `${property.nearbyMetro} and ${property.nearbyOffices[0]}`, Math.min(96, locality.transitScore + 12)],
+    ['Investor', `${property.rentalYield}% yield and ${property.appreciationRate}% growth`, Math.min(96, property.rentalYield * 12 + property.appreciationRate * 5)],
   ];
   return (
-    <ModuleShell title="Family Compass" eyebrow="Multi-person decisioning">
+    <ModuleShell title="Family Compass" eyebrow="Multi-person decisioning" action={<div className="min-w-[320px]"><PropertySelector label="Compare family fit" /></div>}>
+      <div className="mb-5 glass-card rounded-lg p-5">
+        <p className="text-sm text-text-secondary">Family decision for</p>
+        <h2 className="mt-1 text-xl font-semibold text-text-primary">{property.title}</h2>
+        <p className="mt-2 text-sm text-text-secondary">{property.bedrooms} BHK, {property.bathrooms} baths, {property.facing} facing, {property.furnishing}</p>
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {personas.map(([name, detail, score]) => (
           <div key={name} className="glass-card rounded-lg p-5">
             <Users className="text-accent-purple" size={22} />
             <p className="mt-4 text-lg font-semibold text-text-primary">{name}</p>
             <p className="mt-2 min-h-[44px] text-sm text-text-secondary">{detail}</p>
-            <div className="mt-5 h-2 rounded-full bg-white/[0.08]"><div className="h-2 rounded-full bg-accent-green" style={{ width: `${score}%` }} /></div>
-            <p className="mt-2 text-sm text-accent-green">{score}% aligned</p>
+            <div className="mt-5 h-2 rounded-full bg-white/[0.08]"><div className="h-2 rounded-full bg-accent-green" style={{ width: `${Math.round(Number(score))}%` }} /></div>
+            <p className="mt-2 text-sm text-accent-green">{Math.round(Number(score))}% aligned</p>
           </div>
         ))}
       </div>
@@ -455,13 +551,27 @@ function FamilyModule() {
 }
 
 function InvestmentModule() {
-  const data = properties.slice(0, 12).map((p) => ({ name: p.locality.split(' ')[0], growth: p.appreciationRate, yield: p.rentalYield }));
+  const property = getSelectedProperty(useAppStore((s) => s.selectedPropertyId));
+  const peers = properties
+    .filter((p) => p.city === property.city || p.locality === property.locality)
+    .slice(0, 12);
+  const data = peers.map((p) => ({ name: p.locality.split(' ')[0], growth: p.appreciationRate, yield: p.rentalYield }));
+  const investmentScore = Math.min(98, Math.round(property.appreciationRate * 6 + property.rentalYield * 10 + property.builderRating * 7));
   return (
-    <ModuleShell title="Investment Intel" eyebrow="Returns and risk">
+    <ModuleShell title="Investment Intel" eyebrow="Returns and risk" action={<div className="min-w-[320px]"><PropertySelector label="Investment property" /></div>}>
       <div className="grid gap-5 lg:grid-cols-3">
-        <MetricCard icon={TrendingUp} label="Top appreciation" value="12.5%" tone="green" />
-        <MetricCard icon={IndianRupee} label="Best rental yield" value="4.0%" tone="amber" />
-        <MetricCard icon={Star} label="Balanced score" value="91/100" tone="purple" />
+        <MetricCard icon={TrendingUp} label="Selected appreciation" value={`${property.appreciationRate}%`} tone="green" />
+        <MetricCard icon={IndianRupee} label="Selected rental yield" value={`${property.rentalYield}%`} tone="amber" />
+        <MetricCard icon={Star} label="Investment score" value={`${investmentScore}/100`} tone="purple" />
+      </div>
+      <div className="mt-5 glass-card rounded-lg p-5">
+        <h2 className="text-lg font-semibold text-text-primary">{property.title}</h2>
+        <div className="mt-4 grid gap-3 text-sm text-text-secondary md:grid-cols-4">
+          <span>Price {formatPrice(property.price)}</span>
+          <span>Area {property.area} sqft</span>
+          <span>Builder {property.builderRating}/5</span>
+          <span>Possession {property.possession}</span>
+        </div>
       </div>
       <div className="mt-5 grid gap-5 lg:grid-cols-2">
         <div className="glass-card h-[360px] rounded-lg p-5">
@@ -497,15 +607,23 @@ function DiscoverModule() {
   const { searchQuery, setSearchQuery } = useAppStore();
   const [city, setCity] = useState(cityOptions[0]);
   const [budget, setBudget] = useState(budgetOptions[0]);
+  const [type, setType] = useState(typeOptions[0]);
+  const [bedrooms, setBedrooms] = useState(bedroomOptions[0]);
   const filtered = properties.filter((p) => {
     const text = `${p.title} ${p.locality} ${p.city} ${p.amenities.join(' ')}`.toLowerCase();
-    return text.includes(searchQuery.toLowerCase()) && (city === 'All cities' || p.city === city) && p.price >= budget.min && p.price <= budget.max;
+    const bedroomCount = Number(bedrooms.split(' ')[0]);
+    return text.includes(searchQuery.toLowerCase())
+      && (city === 'All cities' || p.city === city)
+      && (type === 'All types' || p.type === type)
+      && (bedrooms === 'Any BHK' || p.bedrooms === bedroomCount)
+      && p.price >= budget.min
+      && p.price <= budget.max;
   });
   const ranked = filtered.slice(0, 12).map((property) => ({ property, score: scoreProperty(property) }));
 
   return (
     <ModuleShell title="Property Discovery" eyebrow="Fast search">
-      <div className="mb-5 grid gap-3 md:grid-cols-[1fr_180px_180px_auto]">
+      <div className="mb-5 grid gap-3 md:grid-cols-[1fr_150px_150px_140px_140px]">
         <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-bg-secondary px-3">
           <Search size={17} className="text-text-secondary" />
           <input value={searchQuery} onChange={(e: any) => setSearchQuery(e.target.value)} placeholder="Search area, amenity, builder..." className="h-11 min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none" />
@@ -516,7 +634,12 @@ function DiscoverModule() {
         <select value={budget.label} onChange={(e: any) => setBudget(budgetOptions.find((b) => b.label === e.target.value) ?? budgetOptions[0])} className="h-11 rounded-lg border border-white/[0.08] bg-bg-secondary px-3 text-sm text-text-primary">
           {budgetOptions.map((b) => <option key={b.label}>{b.label}</option>)}
         </select>
-        <button className="inline-flex h-11 items-center gap-2 rounded-lg bg-white/[0.06] px-4 text-sm text-text-primary"><SlidersHorizontal size={16} /> Filters</button>
+        <select value={bedrooms} onChange={(e: any) => setBedrooms(e.target.value)} className="h-11 rounded-lg border border-white/[0.08] bg-bg-secondary px-3 text-sm text-text-primary">
+          {bedroomOptions.map((b) => <option key={b}>{b}</option>)}
+        </select>
+        <select value={type} onChange={(e: any) => setType(e.target.value)} className="h-11 rounded-lg border border-white/[0.08] bg-bg-secondary px-3 text-sm text-text-primary">
+          {typeOptions.map((t) => <option key={t}>{t}</option>)}
+        </select>
       </div>
       <div className="mb-5 grid gap-4 md:grid-cols-4">
         <MetricCard icon={Building2} label="Listings" value={String(filtered.length)} />
