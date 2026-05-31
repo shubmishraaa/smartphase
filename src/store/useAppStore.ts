@@ -15,6 +15,8 @@ interface AppState {
   setDemoStep: (s: number) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -32,4 +34,6 @@ export const useAppStore = create<AppState>((set) => ({
   setDemoStep: (s) => set({ demoStep: s }),
   sidebarOpen: false,
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
+  searchQuery: '',
+  setSearchQuery: (q) => set({ searchQuery: q }),
 }));

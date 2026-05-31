@@ -1,15 +1,33 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 let genAI: GoogleGenerativeAI | null = null;
+declare const __GEMINI_API_KEY__: string;
 
 export function initGemini(apiKey: string) {
   genAI = new GoogleGenerativeAI(apiKey);
+}
+
+export function getGeminiApiKey() {
+  const env = import.meta.env as Record<string, string | undefined>;
+  return env.VITE_GEMINI_API_KEY || env.VITE_GOOGLE_API_KEY || __GEMINI_API_KEY__ || '';
+}
+
+export function hasGeminiKey() {
+  return getGeminiApiKey().trim().length > 0;
+}
+
+function ensureGemini() {
+  if (!genAI) {
+    const apiKey = getGeminiApiKey();
+    if (apiKey) initGemini(apiKey);
+  }
 }
 
 export async function chatWithGemini(
   messages: { role: string; text: string }[],
   systemPrompt: string
 ): Promise<string> {
+  ensureGemini();
   if (!genAI) throw new Error('Gemini not initialized');
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const chat = model.startChat({
@@ -24,6 +42,7 @@ export async function chatWithGemini(
 }
 
 export async function analyzeWithGemini(prompt: string): Promise<string> {
+  ensureGemini();
   if (!genAI) throw new Error('Gemini not initialized');
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const result = await model.generateContent(prompt);
@@ -34,6 +53,7 @@ export async function analyzeImagesWithGemini(
   images: { data: string; mimeType: string }[],
   prompt: string
 ): Promise<string> {
+  ensureGemini();
   if (!genAI) throw new Error('Gemini not initialized');
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
   const parts: any[] = images.map((img) => ({

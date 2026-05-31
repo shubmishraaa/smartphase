@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   AreaChart, Area, BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -13,6 +13,7 @@ import HomeModule from './components/modules/HomeModule';
 import { properties, type Property } from './data/properties';
 import { localities } from './data/localities';
 import { useAppStore } from './store/useAppStore';
+import { analyzeImagesWithGemini, chatWithGemini, hasGeminiKey } from './utils/gemini';
 
 const cityOptions = ['All cities', ...Array.from(new Set(properties.map((p) => p.city)))];
 const budgetOptions = [
@@ -24,8 +25,8 @@ const budgetOptions = [
 ];
 
 function formatPrice(value: number) {
-  if (value >= 10000000) return `₹${(value / 10000000).toFixed(value >= 100000000 ? 1 : 2)} Cr`;
-  return `₹${(value / 100000).toFixed(1)} L`;
+  if (value >= 10000000) return `Rs ${(value / 10000000).toFixed(value >= 100000000 ? 1 : 2)} Cr`;
+  return `Rs ${(value / 100000).toFixed(1)} L`;
 }
 
 function scoreProperty(p: Property, weights = { commute: 35, family: 25, investment: 25, calm: 15 }) {
@@ -45,6 +46,15 @@ function getBestProperties(limit = 6) {
     .map((property) => ({ property, score: scoreProperty(property) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function ModuleShell({ title, eyebrow, children, action }: { title: string; eyebrow: string; children: React.ReactNode; action?: React.ReactNode }) {
@@ -125,13 +135,30 @@ function ChatModule() {
     { role: 'ai', text: 'Tell me your budget, preferred city, commute, and family needs. I will shortlist properties with a clear reason.' },
   ]);
   const [draft, setDraft] = useState('3BHK near metro under 2 Cr with good schools');
+  const [loading, setLoading] = useState(false);
 
-  function sendMessage() {
+  async function sendMessage() {
     if (!draft.trim()) return;
-    const picks = getBestProperties(3).map((p) => p.property);
-    const reply = `I found ${picks.length} strong fits. ${picks[0].title} leads because it balances metro access, schools, and ${picks[0].rentalYield}% rental yield. I would compare it with ${picks[1].title} if you want a quieter micro-market.`;
-    setMessages((m) => [...m, { role: 'user', text: draft }, { role: 'ai', text: reply }]);
+    const userText = draft.trim();
+    const nextMessages = [...messages, { role: 'user', text: userText }];
+    setMessages(nextMessages);
     setDraft('');
+    setLoading(true);
+    const picks = getBestProperties(3).map((p) => p.property);
+    const fallback = `I found ${picks.length} strong fits. ${picks[0].title} leads because it balances metro access, schools, and ${picks[0].rentalYield}% rental yield. I would compare it with ${picks[1].title} if you want a quieter micro-market.`;
+    try {
+      const reply = hasGeminiKey()
+        ? await chatWithGemini(
+            nextMessages,
+            `You are SmartSpace, an Indian real estate advisor. Recommend from this property data: ${JSON.stringify(picks)}. Be concise and practical.`,
+          )
+        : fallback;
+      setMessages((m) => [...m, { role: 'ai', text: reply }]);
+    } catch {
+      setMessages((m) => [...m, { role: 'ai', text: fallback }]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -140,7 +167,7 @@ function ChatModule() {
         <div className="glass-card flex min-h-[590px] flex-col rounded-lg">
           <div className="border-b border-white/[0.08] p-4">
             <div className="flex items-center gap-2 text-sm text-text-secondary">
-              <Sparkles size={16} className="text-accent-green" /> Demo AI mode gives instant recommendations. Add a Gemini key in the sidebar for live AI.
+              <Sparkles size={16} className="text-accent-green" /> {hasGeminiKey() ? 'Gemini is connected from environment variables.' : 'Instant AI demo mode is active.'}
             </div>
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -151,13 +178,18 @@ function ChatModule() {
                 </div>
               </div>
             ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="rounded-lg bg-white/[0.06] px-4 py-3 text-sm text-text-secondary">Thinking...</div>
+              </div>
+            )}
           </div>
           <div className="flex gap-2 border-t border-white/[0.08] p-4">
             <button className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/[0.1] text-text-secondary hover:text-text-primary" title="Voice input">
               <Mic size={18} />
             </button>
             <input value={draft} onChange={(e: any) => setDraft(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && sendMessage()} className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-bg-primary/80 px-4 text-sm text-text-primary outline-none focus:border-accent-blue/50" />
-            <button onClick={sendMessage} className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent-blue text-white" title="Send">
+            <button onClick={sendMessage} disabled={loading} className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent-blue text-white disabled:opacity-60" title="Send">
               <Send size={18} />
             </button>
           </div>
@@ -291,18 +323,68 @@ function SimulatorModule() {
 }
 
 function XrayModule() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [report, setReport] = useState('');
+  const [loading, setLoading] = useState(false);
   const flags = ['Check bathroom seepage near shared wall', 'Ask for latest maintenance ledger', 'Verify balcony waterproofing', 'Confirm fire NOC and parking allotment'];
+
+  async function runInspection(selectedFiles: File[]) {
+    setFiles(selectedFiles);
+    setLoading(true);
+    const fallback = [
+      'Inspection summary: Photos received and checklist generated.',
+      'Verdict: Consider after verification.',
+      'Priority checks: seepage, balcony waterproofing, electrical panel age, parking allotment, and society maintenance ledger.',
+      'Negotiation angle: keep 3-5% buffer until documents and snag list are cleared.',
+    ].join('\n');
+    try {
+      if (hasGeminiKey() && selectedFiles.length) {
+        const images = await Promise.all(
+          selectedFiles.slice(0, 4).map(async (file) => ({
+            data: await fileToBase64(file),
+            mimeType: file.type || 'image/jpeg',
+          })),
+        );
+        const aiReport = await analyzeImagesWithGemini(
+          images,
+          'Inspect these property photos for visible real-estate risks. Return concise bullets with red flags, green flags, maintenance questions, and a buy/consider/avoid verdict.',
+        );
+        setReport(aiReport);
+      } else {
+        setReport(fallback);
+      }
+    } catch {
+      setReport(fallback);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <ModuleShell title="Property X-Ray" eyebrow="Inspection assistant">
       <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
         <div className="glass-card flex min-h-[430px] flex-col items-center justify-center rounded-lg border-dashed p-8 text-center">
           <ScanLine size={42} className="text-accent-blue" />
           <h2 className="mt-4 text-lg font-semibold text-text-primary">Upload photos for AI inspection</h2>
-          <p className="mt-2 max-w-md text-sm text-text-secondary">Demo report is ready now; live image analysis connects through Gemini when an API key is added.</p>
-          <button className="mt-6 rounded-lg bg-accent-blue px-5 py-2.5 text-sm font-medium text-white">Choose images</button>
+          <p className="mt-2 max-w-md text-sm text-text-secondary">{hasGeminiKey() ? 'Gemini image analysis is connected from environment variables.' : 'Upload works now and returns a complete demo inspection report.'}</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e: any) => runInspection(Array.from(e.target.files ?? []))}
+          />
+          <button onClick={() => fileInputRef.current?.click()} className="mt-6 rounded-lg bg-accent-blue px-5 py-2.5 text-sm font-medium text-white">Choose images</button>
+          {files.length > 0 && <p className="mt-4 text-xs text-text-secondary">{files.length} image{files.length === 1 ? '' : 's'} selected</p>}
         </div>
         <div className="glass-card rounded-lg p-5">
           <h2 className="text-sm font-semibold text-text-primary">Instant inspection checklist</h2>
+          {loading && <p className="mt-4 rounded-lg bg-white/[0.04] p-3 text-sm text-text-secondary">Analyzing property photos...</p>}
+          {report && (
+            <pre className="mt-4 whitespace-pre-wrap rounded-lg bg-bg-primary/70 p-4 text-sm leading-relaxed text-text-primary">{report}</pre>
+          )}
           <div className="mt-5 space-y-3">
             {flags.map((flag, i) => (
               <div key={flag} className="flex items-start gap-3 rounded-lg bg-white/[0.04] p-3">
@@ -412,12 +494,12 @@ function InvestmentModule() {
 }
 
 function DiscoverModule() {
-  const [query, setQuery] = useState('');
+  const { searchQuery, setSearchQuery } = useAppStore();
   const [city, setCity] = useState(cityOptions[0]);
   const [budget, setBudget] = useState(budgetOptions[0]);
   const filtered = properties.filter((p) => {
     const text = `${p.title} ${p.locality} ${p.city} ${p.amenities.join(' ')}`.toLowerCase();
-    return text.includes(query.toLowerCase()) && (city === 'All cities' || p.city === city) && p.price >= budget.min && p.price <= budget.max;
+    return text.includes(searchQuery.toLowerCase()) && (city === 'All cities' || p.city === city) && p.price >= budget.min && p.price <= budget.max;
   });
   const ranked = filtered.slice(0, 12).map((property) => ({ property, score: scoreProperty(property) }));
 
@@ -426,7 +508,7 @@ function DiscoverModule() {
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_180px_180px_auto]">
         <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-bg-secondary px-3">
           <Search size={17} className="text-text-secondary" />
-          <input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search area, amenity, builder..." className="h-11 min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none" />
+          <input value={searchQuery} onChange={(e: any) => setSearchQuery(e.target.value)} placeholder="Search area, amenity, builder..." className="h-11 min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none" />
         </div>
         <select value={city} onChange={(e: any) => setCity(e.target.value)} className="h-11 rounded-lg border border-white/[0.08] bg-bg-secondary px-3 text-sm text-text-primary">
           {cityOptions.map((c) => <option key={c}>{c}</option>)}
@@ -454,6 +536,7 @@ export default function App() {
   const moduleMap: Record<string, JSX.Element> = {
     home: <HomeModule />,
     chat: <ChatModule />,
+    discover: <DiscoverModule />,
     lifestyle: <LifestyleModule />,
     map: <SmartMapModule />,
     simulator: <SimulatorModule />,

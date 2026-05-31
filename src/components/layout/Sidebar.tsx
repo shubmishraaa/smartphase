@@ -1,12 +1,13 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, MessageSquare, Heart, Map, Play,
-  ScanLine, Handshake, Users, TrendingUp, X
+  ScanLine, Handshake, Users, TrendingUp, X, Search, Sparkles
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 
 const navItems = [
   { id: 'home', label: 'Home', icon: Home },
+  { id: 'discover', label: 'Discover', icon: Search },
   { id: 'chat', label: 'AI Realtor', icon: MessageSquare },
   { id: 'lifestyle', label: 'Lifestyle Match', icon: Heart },
   { id: 'map', label: 'Smart Map', icon: Map },
@@ -90,28 +91,17 @@ export default function Sidebar() {
           </div>
         </nav>
 
-        {/* API Key section */}
+        {/* AI status */}
         <div className="p-4 border-t border-white/[0.08]">
-          <div className="glass-card p-3 rounded-xl">
-            <p className="text-[11px] text-text-secondary mb-2 font-medium">Gemini API Key</p>
-            <ApiKeyInput />
+          <div className="glass-card p-3 rounded-xl flex items-start gap-2.5">
+            <Sparkles size={16} className="text-accent-green mt-0.5" />
+            <div>
+              <p className="text-[11px] text-text-primary font-medium">AI assistant ready</p>
+              <p className="text-[11px] text-text-secondary mt-1">Uses Vercel env when available, with instant demo fallback.</p>
+            </div>
           </div>
         </div>
       </motion.aside>
     </>
-  );
-}
-
-function ApiKeyInput() {
-  const { geminiApiKey, setGeminiApiKey } = useAppStore();
-  return (
-    <input
-      type="password"
-      value={geminiApiKey}
-      onChange={(e: any) => setGeminiApiKey(e.target.value)}
-      placeholder="Enter API key..."
-      className="w-full bg-bg-primary/80 border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-text-primary
-        placeholder:text-text-secondary/50 focus:outline-none focus:border-accent-blue/40 transition-colors"
-    />
   );
 }
