@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AreaChart, Area, BarChart, Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -88,6 +88,95 @@ function PropertySelector({ label = 'Selected property' }: { label?: string }) {
   );
 }
 
+function LivePropertySnapshot() {
+  const selectedId = useAppStore((s) => s.selectedPropertyId);
+  const setSelectedPropertyId = useAppStore((s) => s.setSelectedPropertyId);
+  const property = getSelectedProperty(selectedId);
+  const locality = getLocalityForProperty(property);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const cityPeers = properties.filter((peer) => peer.city === property.city);
+  const cityAveragePrice = cityPeers.reduce((sum, peer) => sum + peer.pricePerSqft, 0) / Math.max(cityPeers.length, 1);
+  const pricePosition = Math.round(((property.pricePerSqft - cityAveragePrice) / cityAveragePrice) * 100);
+  const demandScore = Math.round((locality.rentalDemand + locality.amenityDensity + locality.transitScore) / 3);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLastUpdated(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="mb-6 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="glass-card overflow-hidden rounded-lg">
+        <div className="grid gap-4 p-4 md:grid-cols-[180px_1fr]">
+          <img src={property.imageUrl} alt={property.title} className="h-36 w-full rounded-lg object-cover" />
+          <div>
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.14em] text-accent-green">Selected apartment</p>
+                <h2 className="mt-1 text-xl font-semibold text-text-primary">{property.title}</h2>
+                <p className="mt-1 flex items-center gap-1 text-sm text-text-secondary">
+                  <MapPin size={14} /> {property.locality}, {property.city}
+                </p>
+              </div>
+              <select
+                value={property.id}
+                onChange={(e: any) => setSelectedPropertyId(Number(e.target.value))}
+                className="h-10 min-w-[260px] rounded-lg border border-white/[0.08] bg-bg-secondary px-3 text-sm text-text-primary outline-none focus:border-accent-blue/50"
+              >
+                {properties.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mt-4 grid gap-3 text-sm text-text-secondary sm:grid-cols-4">
+              <span>{formatPrice(property.price)}</span>
+              <span>{property.bedrooms} BHK</span>
+              <span>{property.area} sqft</span>
+              <span>{property.possession}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {property.amenities.slice(0, 5).map((amenity) => (
+                <span key={amenity} className="rounded-full bg-white/[0.06] px-3 py-1 text-xs text-text-secondary">{amenity}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="glass-card rounded-lg p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.14em] text-accent-green">Live market snapshot</p>
+            <p className="mt-1 text-xs text-text-secondary">Refreshes while the app is open. Last updated {lastUpdated.toLocaleTimeString()}</p>
+          </div>
+          <span className="rounded-lg bg-accent-blue/12 px-2.5 py-1 text-sm font-semibold text-accent-blue">{scoreProperty(property)}/100</span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-lg bg-white/[0.04] p-3">
+            <p className="text-text-secondary">Price vs city</p>
+            <p className={`mt-1 font-semibold ${pricePosition <= 0 ? 'text-accent-green' : 'text-accent-amber'}`}>
+              {pricePosition > 0 ? '+' : ''}{pricePosition}%
+            </p>
+          </div>
+          <div className="rounded-lg bg-white/[0.04] p-3">
+            <p className="text-text-secondary">Demand</p>
+            <p className="mt-1 font-semibold text-text-primary">{demandScore}/100</p>
+          </div>
+          <div className="rounded-lg bg-white/[0.04] p-3">
+            <p className="text-text-secondary">Rental yield</p>
+            <p className="mt-1 font-semibold text-text-primary">{property.rentalYield}%</p>
+          </div>
+          <div className="rounded-lg bg-white/[0.04] p-3">
+            <p className="text-text-secondary">Growth</p>
+            <p className="mt-1 font-semibold text-text-primary">{property.appreciationRate}%</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function fileToBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -97,7 +186,7 @@ function fileToBase64(file: File) {
   });
 }
 
-function ModuleShell({ title, eyebrow, children, action }: { title: string; eyebrow: string; children: React.ReactNode; action?: React.ReactNode }) {
+function ModuleShell({ title, eyebrow, children, action, showSnapshot = true }: { title: string; eyebrow: string; children: React.ReactNode; action?: React.ReactNode; showSnapshot?: boolean }) {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -107,6 +196,7 @@ function ModuleShell({ title, eyebrow, children, action }: { title: string; eyeb
         </div>
         {action}
       </div>
+      {showSnapshot && <LivePropertySnapshot />}
       {children}
     </div>
   );
